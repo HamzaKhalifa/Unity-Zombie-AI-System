@@ -6,6 +6,7 @@ using UnityEngine.AI;
 public enum AIStateType { None, Idle, Alerted, Patrol, Attack, Feeding, Pursuit, Dead }
 public enum AITargetType { None, Waypoint, Visual_Player, Visual_Light, Visual_Food, Audio }
 public enum AITriggerEventType { Enter, Stay, Exit }
+public enum AIBoneAlignmentType { XAxis, YAxis, ZAxis, XAxisInverted, YAxisInverted, ZAxisInverted }
 
 public struct AITarget
 {
@@ -37,6 +38,8 @@ public struct AITarget
     }
 }
 
+[RequireComponent(typeof(Animator))]
+[RequireComponent(typeof(NavMeshAgent))]
 public abstract class AIStateMachine : MonoBehaviour
 {
     public AITarget VisualThreat = new AITarget();
@@ -50,17 +53,20 @@ public abstract class AIStateMachine : MonoBehaviour
     protected int _rootPositionRefCount = 0;
     protected int _rootRotationRefCount = 0;
     protected bool _isTargetReached = false;
+    protected List<Rigidbody> _bodyParts = new List<Rigidbody>();
+    protected int _aiBodyPartLayer = -1;
+    protected Dictionary<string, bool> _animaLayersActive = new Dictionary<string, bool>();
 
     [SerializeField] protected AIStateType _currentStateType = AIStateType.Idle;
+    [SerializeField] protected Transform _rootBone = null;
+    [SerializeField] protected AIBoneAlignmentType _rootBoneAlignment = AIBoneAlignmentType.ZAxis;
     [SerializeField] protected SphereCollider _targetTrigger = null;
     [SerializeField] protected SphereCollider _sensorTrigger = null;
     [SerializeField] protected AIWaypointNetwork _waypointNetwork = null;
     [SerializeField] protected bool _randomPatrol = false;
     [SerializeField] protected int _currentWaypoint = -1;
-
-    [SerializeField]
-    [Range(0, 15)] 
-    protected float _stoppingDistance = 1.0f;
+    [SerializeField] [Range(0, 15)] protected float _stoppingDistance = 1.0f;
+    [SerializeField] protected ILayeredAudioSource _layeredAudioSource = null;
 
     // Cache
     protected Animator _animator;
@@ -114,15 +120,72 @@ public abstract class AIStateMachine : MonoBehaviour
         }
     }
 
+    public void SetLayerActive(string layerName, bool active) {
+        bool layerActive = false;
+        if (_animaLayersActive.TryGetValue(layerName, out layerActive)) {
+            _animaLayersActive[layerName] = active;
+            if (active == false && _layeredAudioSource != null) {
+                _layeredAudioSource.Stop(_animator.GetLayerIndex(layerName));
+            }
+        }
+    }
+
+    public bool IsLayerActive(string layerName) {
+        bool result = false;
+        if (_animaLayersActive.TryGetValue(layerName, out result)) {
+            return result;
+        }
+        return result;
+    }
+
+    public bool PlayAudio(AudioCollection clipPool, int bank, int layer, bool looping = true) {
+        if (_layeredAudioSource == null) return false;
+        return _layeredAudioSource.Play(clipPool, bank, layer, looping);
+    }
+
+    public void StopAudio(int layer) {
+        if (_layeredAudioSource != null) {
+            _layeredAudioSource.Stop(layer);
+        }
+    }
+
+    public void MuteAudio(bool mute) {
+        if (_layeredAudioSource != null) {
+            _layeredAudioSource.Mute(mute);
+        }
+    }
+
     protected virtual void Awake() {
+        // Cache all frequently accessed components
         _transform = transform;
         _animator = GetComponent<Animator>();
         _navAgent = GetComponent<NavMeshAgent>();
         _collider = GetComponent<Collider>();
 
+        AudioSource audioSource = GetComponent<AudioSource>();
+
+        // Register the instance IDs of all the agent's collider and sensor collider
         if (GameSceneManager.instance != null) {
             if (_collider) GameSceneManager.instance.RegisterAIStateMachine(_collider.GetInstanceID(), this);
             if (_sensorTrigger) GameSceneManager.instance.RegisterAIStateMachine(_sensorTrigger.GetInstanceID(), this);
+        }
+
+        // Get layers
+        _aiBodyPartLayer = LayerMask.NameToLayer("AI Body Part");
+
+        // Adding all our body parts to the our body parts list (To be able to change them to kinematic or non kinematic state
+        if (_rootBone != null) {
+            Rigidbody[] bodies = _rootBone.GetComponentsInChildren<Rigidbody>();
+            foreach(Rigidbody bodyPart in bodies) {
+                if (bodyPart != null && bodyPart.gameObject.layer == _aiBodyPartLayer) {
+                    _bodyParts.Add(bodyPart);
+                    GameSceneManager.instance.RegisterAIStateMachine(bodyPart.GetInstanceID(), this);
+                }
+            }
+        }
+
+        if (_animator && audioSource && AudioManager.instance) {
+            _layeredAudioSource = AudioManager.instance.RegisterLayeredAudioSource(audioSource, _animator.layerCount);
         }
 
     }
@@ -249,20 +312,19 @@ public abstract class AIStateMachine : MonoBehaviour
 
     // Lets the AI agent know when it enters the sphere of influence of a waypoint or a player's last sightest position
     protected virtual void OnTriggerEnter(Collider other) {
-        if (_targetTrigger == null || other != _targetTrigger) return;
-
-        _isTargetReached = true;
-
-        // Notify child state
-        if (_currentState)
-            _currentState.OnDestinationReach(true);
+        if (_targetTrigger && other == _targetTrigger) {
+            _isTargetReached = true;
+            // Notify child state
+            if (_currentState)
+                _currentState.OnDestinationReach(true);
+        }
     }
 
     protected virtual void OnTriggerStay(Collider other)
     {
-        if (_targetTrigger == null || other != _targetTrigger) return;
-
-        _isTargetReached = true;
+        if (_targetTrigger && other == _targetTrigger) {
+            _isTargetReached = true;
+        }
     }
 
     // When the AI agent leaves a waypoint or a player's last sightest position
@@ -309,6 +371,15 @@ public abstract class AIStateMachine : MonoBehaviour
         _rootRotationRefCount += rootRotation;
     }
 
+    public void SetStateOverride(AIStateType state) {
+        if (state != _currentStateType && _states.ContainsKey(state)) {
+            if (_currentState != null) _currentState.OnExitState();
+            _currentState = _states[state];
+            _currentStateType = state;
+            _currentState.OnEnterState();
+        }
+    }
+
     public Vector3 GetWaypointPosition(bool increment) {
         if (_currentWaypoint == -1) {
             if (_randomPatrol)
@@ -340,5 +411,23 @@ public abstract class AIStateMachine : MonoBehaviour
             }
         }
         else _currentWaypoint = _currentWaypoint == _waypointNetwork.Waypoints.Count - 1 ? 0 : _currentWaypoint + 1;
+    }
+
+    public virtual void TakeDamage(Vector3 position, 
+                           Vector3 force, 
+                           int damage, 
+                           // The body part that got hit
+                           Rigidbody bodyPart, 
+                           // To tell the damage system wchich player hit the zombie
+                           CharacterManager characterManager, 
+                           int hitDirection = 0) {
+
+    }
+
+    void OnDestroy()
+    {
+        if (_layeredAudioSource != null && AudioManager.instance) {
+            AudioManager.instance.UnregisterLayeredAudioSource(_layeredAudioSource);
+        }
     }
 }

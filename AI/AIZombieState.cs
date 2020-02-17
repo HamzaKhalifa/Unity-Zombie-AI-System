@@ -15,8 +15,7 @@ public abstract class AIZombieState : AIState
     {
         _playerLayerMask = LayerMask.GetMask("Player", "AI Body Part", "Default");
         _bodyPartLayer = LayerMask.NameToLayer("AI Body Part");
-        //_visualLayerMask = LayerMask.GetMask("Player", "AI Body Part", "Visual Aggravator", "Default");
-        _visualLayerMask = LayerMask.GetMask("Player", "AI Body Part", "Visual Aggravator") + 1;
+        _visualLayerMask = LayerMask.GetMask("Player", "AI Body Part", "Visual Aggravator", "Default");
     }
 
     public override void SetStateMachine(AIStateMachine machine) {
@@ -47,8 +46,8 @@ public abstract class AIZombieState : AIState
                 float distanceToThreat = Vector3.Distance(_zombieStateMachine.sensorPosition, flashLightTrigger.transform.position);
                 float zSize = flashLightTrigger.size.z * flashLightTrigger.transform.lossyScale.z;
                 float aggrFactor = distanceToThreat / zSize;
-
-                if (aggrFactor <= _zombieStateMachine.sight && aggrFactor <= _zombieStateMachine.intelligence) {
+                if (aggrFactor <= _zombieStateMachine.sight && aggrFactor <= _zombieStateMachine.intelligence)
+                {
                     _zombieStateMachine.VisualThreat.Set(AITargetType.Visual_Light, other, other.transform.position, distanceToThreat);
                 }
             } else if (other.CompareTag("AI Sound Emitter")) {
@@ -77,7 +76,7 @@ public abstract class AIZombieState : AIState
                     if (distanceToThreat < _zombieStateMachine.VisualThreat.distance) {
                         RaycastHit hitInfo;
                         if (ColliderIsVisible(other, out hitInfo, _visualLayerMask)) {
-                            Debug.Log("Setting food as threat");
+                            Debug.Log("Found visual food");
                             _zombieStateMachine.VisualThreat.Set(AITargetType.Visual_Food, other, other.transform.position, distanceToThreat);
                         }
                     }
@@ -113,9 +112,12 @@ public abstract class AIZombieState : AIState
                     hitInfo = hit;
                 }
             } else {
-                closestColliderDistance = hit.distance;
-                closestCollider = hit.collider;
-                hitInfo = hit;
+                if (hit.distance < closestColliderDistance) {
+                    closestColliderDistance = hit.distance;
+                    closestCollider = hit.collider;
+                    hitInfo = hit;
+                }
+
             }
         }
 

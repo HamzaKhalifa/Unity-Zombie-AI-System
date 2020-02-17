@@ -20,7 +20,6 @@ public class AIZombieState_Patrol1 : AIZombieState
         if (_zombieStateMachine == null) return;
         
         _zombieStateMachine.NavAgentControl(true, false);
-        _zombieStateMachine.speed = _speed;
         _zombieStateMachine.seeking = 0;
         _zombieStateMachine.feeding = false;
         // _zombieStateMachine.crawling = false;
@@ -58,8 +57,17 @@ public class AIZombieState_Patrol1 : AIZombieState
             }
         }
 
+        if (_zombieStateMachine.navAgent.pathPending) {
+
+            _zombieStateMachine.speed = 0;
+            return AIStateType.Patrol;
+        } else {
+            
+            _zombieStateMachine.speed = _speed;
+        }
+
         float angle = Vector3.Angle(_zombieStateMachine.transform.forward, _zombieStateMachine.navAgent.steeringTarget - _zombieStateMachine.transform.position);
-        if (angle > _turnOnSpotThreshold) {
+        if (angle > _turnOnSpotThreshold && !_zombieStateMachine.isCrawling) {
             return AIStateType.Alerted;
         }
 

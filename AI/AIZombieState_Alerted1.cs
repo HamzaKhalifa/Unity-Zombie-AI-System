@@ -8,10 +8,14 @@ public class AIZombieState_Alerted1 : AIZombieState
     [SerializeField] float  _waypointAngleThreshold =   90.0f;
     [SerializeField] float  _threatAngleThreshold   =   10.0f;
     [SerializeField] float _directionChangeTime = 10.0f;
+    [SerializeField] float _slerpSpeed = 45.0f;
 
     // Private Fields
     float   _timer  =   0.0f;
     float _directionChangeTimer = 0f;
+    float _screamChance = 0f;
+    float _nextScream = 0f;
+    float _screamFrequency = 120f;
 
     // ------------------------------------------------------------------
     // Name :   GetStateType
@@ -43,6 +47,8 @@ public class AIZombieState_Alerted1 : AIZombieState
         _zombieStateMachine.attackType = 0;
         _directionChangeTimer = 0f;
 
+        _screamChance = _zombieStateMachine.screamChance - Random.value;
+
         _timer = _maxDuration;
     }
 
@@ -68,6 +74,13 @@ public class AIZombieState_Alerted1 : AIZombieState
         if (_zombieStateMachine.VisualThreat.type==AITargetType.Visual_Player)
         {
             _zombieStateMachine.SetTarget ( _zombieStateMachine.VisualThreat );
+            if (_screamChance > 0 && Time.time > _nextScream && !_zombieStateMachine.isCrawling) {
+                if (_zombieStateMachine.Scream()) {
+                    _screamChance = float.MinValue;
+                    _nextScream = Time.time + _screamFrequency;
+                    return AIStateType.Alerted;
+                }
+            }
             return AIStateType.Pursuit;
         }   
 
@@ -83,8 +96,9 @@ public class AIZombieState_Alerted1 : AIZombieState
             _timer = _maxDuration;
         }   
 
-        if (_zombieStateMachine.AudioThreat.type==AITargetType.None && 
-            _zombieStateMachine.VisualThreat.type==AITargetType.Visual_Food)
+        if (_zombieStateMachine.AudioThreat.type==AITargetType.None
+            && _zombieStateMachine.VisualThreat.type==AITargetType.Visual_Food
+            && _zombieStateMachine.targetType == AITargetType.None)
         {
             _zombieStateMachine.SetTarget ( _stateMachine.VisualThreat );
             return AIStateType.Pursuit;
@@ -101,7 +115,7 @@ public class AIZombieState_Alerted1 : AIZombieState
             {
                 return AIStateType.Pursuit;
             }
-            if (_directionChangeTime > _directionChangeTimer) {
+            if (_directionChangeTimer > _directionChangeTime) {
                 if (Random.value < _zombieStateMachine.intelligence)
                 {
                     _zombieStateMachine.seeking = (int)Mathf.Sign(angle);
@@ -114,15 +128,24 @@ public class AIZombieState_Alerted1 : AIZombieState
                 _directionChangeTimer = 0f;
             }
         }
-        else
-            if (_zombieStateMachine.targetType==AITargetType.Waypoint && !_zombieStateMachine.navAgent.pathPending)
-        {
-            angle = AIState.FindSignedAngle(_zombieStateMachine.transform.forward, 
-                                            _zombieStateMachine.navAgent.steeringTarget- _zombieStateMachine.transform.position);
+        else if (_zombieStateMachine.targetType==AITargetType.Waypoint && !_zombieStateMachine.navAgent.pathPending) {
 
-            if (Mathf.Abs (angle) < _waypointAngleThreshold) return AIStateType.Patrol;
+            angle = AIState.FindSignedAngle(_zombieStateMachine.transform.forward, 
+                                                _zombieStateMachine.navAgent.steeringTarget- _zombieStateMachine.transform.position);
+
+            if (Mathf.Abs(angle) < _waypointAngleThreshold || _zombieStateMachine.isCrawling) {
+                return AIStateType.Patrol; 
+            }
+
             _zombieStateMachine.seeking = (int)Mathf.Sign(angle);
+        } 
+        else if (_directionChangeTimer > _directionChangeTime) {
+            _zombieStateMachine.seeking = (int)Mathf.Sign(Random.Range(-1.0f, 1.0f));
+            _directionChangeTimer = 0f;
         }
+
+        if (!_zombieStateMachine.useRootPosition)
+            _zombieStateMachine.transform.Rotate(new Vector3(0, _zombieStateMachine.seeking * _slerpSpeed * Time.time, 0f));
 
         return AIStateType.Alerted;
     }

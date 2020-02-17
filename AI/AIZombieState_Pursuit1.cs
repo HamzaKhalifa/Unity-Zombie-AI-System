@@ -8,18 +8,21 @@ using UnityEngine.AI;
 // -----------------------------------------------------------------
 public class AIZombieState_Pursuit1 : AIZombieState
 {
-    [SerializeField] [Range(0, 10)] private float _speed = 1.0f;
-    [SerializeField] private float _slerpSpeed = 5.0f;
-    [SerializeField] private float _repathDistanceMultiplier = 0.035f;
-    [SerializeField] private float _repathVisualMinDuration = 0.05f;
-    [SerializeField] private float _repathVisualMaxDuration = 5.0f;
-    [SerializeField] private float _repathAudioMinDuration = 0.25f;
-    [SerializeField] private float _repathAudioMaxDuration = 5.0f;
-    [SerializeField] private float _maxDuration = 40.0f;
+    [SerializeField] [Range(0, 10)] float _speed = 1.0f;
+    [SerializeField] float _slerpSpeed = 5.0f;
+    [SerializeField] float _repathDistanceMultiplier = 0.035f;
+    [SerializeField] float _repathVisualMinDuration = 0.05f;
+    [SerializeField] float _repathVisualMaxDuration = 5.0f;
+    [SerializeField] float _repathAudioMinDuration = 0.25f;
+    [SerializeField] float _repathAudioMaxDuration = 5.0f;
+    [SerializeField] float _maxDuration = 40.0f;
+    [SerializeField] [Range(0, 1f)] float _lookAtWeight = .7f;
+    [SerializeField] [Range(0, 90f)] float _lookAtAngleThreshold = 15f;
 
     // Private Fields
-    private float _timer = 0.0f;
-    private float _repathTimer = 0.0f;
+    float _timer = 0.0f;
+    float _repathTimer = 0.0f;
+    float _currentLookAtWeight = 0f;
 
     // Mandatory Overrides
     public override AIStateType GetStateType() { return AIStateType.Pursuit; }
@@ -35,7 +38,6 @@ public class AIZombieState_Pursuit1 : AIZombieState
 
         // Configure State Machine
         _zombieStateMachine.NavAgentControl(true, false);
-        _zombieStateMachine.speed = _speed;
         _zombieStateMachine.seeking = 0;
         _zombieStateMachine.feeding = false;
         _zombieStateMachine.attackType = 0;
@@ -48,6 +50,8 @@ public class AIZombieState_Pursuit1 : AIZombieState
         // Set path
         _zombieStateMachine.navAgent.SetDestination(_zombieStateMachine.targetPosition);
         _zombieStateMachine.navAgent.isStopped = false;
+
+        _currentLookAtWeight = 0f;
 
     }
 
@@ -74,13 +78,11 @@ public class AIZombieState_Pursuit1 : AIZombieState
         {
             switch (_stateMachine.targetType)
             {
-
                 // If we have reached the source
                 case AITargetType.Audio:
                 case AITargetType.Visual_Light:
                     _stateMachine.ClearTarget();    // Clear the threat
                     return AIStateType.Alerted;     // Become alert and scan for targets
-
                 case AITargetType.Visual_Food:
                     return AIStateType.Feeding;
             }
@@ -90,35 +92,43 @@ public class AIZombieState_Pursuit1 : AIZombieState
         // If for any reason the nav agent has lost its path then call then drop into alerted state
         // so it will try to re-aquire the target or eventually giveup and resume patrolling
         if (_zombieStateMachine.navAgent.isPathStale ||
-            !_zombieStateMachine.navAgent.hasPath ||
-            _zombieStateMachine.navAgent.pathStatus != NavMeshPathStatus.PathComplete)
+            (!_zombieStateMachine.navAgent.hasPath && !_zombieStateMachine.navAgent.pathPending)
+            || _zombieStateMachine.navAgent.pathStatus != NavMeshPathStatus.PathComplete)
         {
             return AIStateType.Alerted;
         }
 
-
-        // If we are close to the target that was a player and we still have the player in our vision then keep facing right at the player
-        if (!_zombieStateMachine.useRootRotation && _zombieStateMachine.targetType == AITargetType.Visual_Player && _zombieStateMachine.VisualThreat.type == AITargetType.Visual_Player && _zombieStateMachine.isTargetReached)
+        if (_zombieStateMachine.navAgent.pathPending)
         {
-            Vector3 targetPos = _zombieStateMachine.targetPosition;
-            targetPos.y = _zombieStateMachine.transform.position.y;
-            Quaternion newRot = Quaternion.LookRotation(targetPos - _zombieStateMachine.transform.position);
-            _zombieStateMachine.transform.rotation = newRot;
+            _zombieStateMachine.speed = 0;
         }
         else
-        // SLowly update our rotation to match the nav agents desired rotation BUT only if we are not persuing the player and are really close to him
-        if (!_stateMachine.useRootRotation && !_zombieStateMachine.isTargetReached)
         {
-            // Generate a new Quaternion representing the rotation we should have
-            Quaternion newRot = Quaternion.LookRotation(_zombieStateMachine.navAgent.desiredVelocity);
+            _zombieStateMachine.speed = _speed;
 
-            // Smoothly rotate to that new rotation over time
-            _zombieStateMachine.transform.rotation = Quaternion.Slerp(_zombieStateMachine.transform.rotation, newRot, Time.deltaTime * _slerpSpeed);
-        }
-        else
-        if (_zombieStateMachine.isTargetReached)
-        {
-            return AIStateType.Alerted;
+            // If we are close to the target that was a player and we still have the player in our vision then keep facing right at the player
+            if (!_zombieStateMachine.useRootRotation && _zombieStateMachine.targetType == AITargetType.Visual_Player && _zombieStateMachine.VisualThreat.type == AITargetType.Visual_Player && _zombieStateMachine.isTargetReached)
+            {
+                Vector3 targetPos = _zombieStateMachine.targetPosition;
+                targetPos.y = _zombieStateMachine.transform.position.y;
+                Quaternion newRot = Quaternion.LookRotation(targetPos - _zombieStateMachine.transform.position);
+                _zombieStateMachine.transform.rotation = newRot;
+            }
+            else
+            // SLowly update our rotation to match the nav agents desired rotation BUT only if we are not pursuing the player and are really close to him
+            if (!_stateMachine.useRootRotation && !_zombieStateMachine.isTargetReached)
+            {
+                // Generate a new Quaternion representing the rotation we should have
+                Quaternion newRot = Quaternion.LookRotation(_zombieStateMachine.navAgent.desiredVelocity);
+
+                // Smoothly rotate to that new rotation over time
+                _zombieStateMachine.transform.rotation = Quaternion.Slerp(_zombieStateMachine.transform.rotation, newRot, Time.deltaTime * _slerpSpeed);
+            }
+            else
+            if (_zombieStateMachine.isTargetReached) // Reached the target but no visual threat in sight
+            {
+                return AIStateType.Alerted;
+            }
         }
 
         // Do we have a visual threat that is the player
@@ -146,8 +156,6 @@ public class AIZombieState_Pursuit1 : AIZombieState
         // in pursuit as nothing else can override
         if (_zombieStateMachine.targetType == AITargetType.Visual_Player)
             return AIStateType.Pursuit;
-
-
 
 
         // If we have a visual threat that is the player's light
@@ -236,5 +244,21 @@ public class AIZombieState_Pursuit1 : AIZombieState
         return AIStateType.Pursuit;
     }
 
+    public override void OnAnimatorIKUpdated(int layerIndex)
+    {
+        if (_zombieStateMachine == null) return;
+
+        if (Vector3.Angle(_zombieStateMachine.transform.forward, _zombieStateMachine.targetPosition - _zombieStateMachine.transform.position) < _lookAtWeight)
+        {
+            _zombieStateMachine.animator.SetLookAtPosition(_zombieStateMachine.targetPosition + Vector3.up);
+            _currentLookAtWeight = Mathf.Lerp(_currentLookAtWeight, _lookAtWeight, Time.deltaTime);
+            _zombieStateMachine.animator.SetLookAtWeight(_currentLookAtWeight);
+        }
+        else
+        {
+            _currentLookAtWeight = Mathf.Lerp(_currentLookAtWeight, 0, Time.deltaTime);
+            _zombieStateMachine.animator.SetLookAtWeight(_currentLookAtWeight);
+        }
+    }
 
 }
